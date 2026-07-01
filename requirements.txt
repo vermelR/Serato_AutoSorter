@@ -1,0 +1,10 @@
+streamlit
+pandas
+numpy
+librosa
+scikit-learn
+joblib
+mutagen
+pyserato
+pyacoustid
+musicbrainzngs

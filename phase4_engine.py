@@ -14,6 +14,10 @@ import numpy as np
 import pandas as pd
 from mutagen import File as MutagenFile
 
+import config
+import genre_model
+import identify
+
 # -------------------------
 # Configuration
 # -------------------------
@@ -235,12 +239,68 @@ def read_track_metadata(path: Path) -> Dict[str, Any]:
 
 
 # -------------------------
+# Genre / Year identification
+# -------------------------
+def identify_genre_year(path: Path, feats: list[float], existing_meta: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Figure out the best genre/year for a track, in priority order:
+      1. Audio fingerprint match (AcoustID -> MusicBrainz) - identifies the
+         *original* recording from how it sounds, and reads its real genre/year.
+      2. Local ML genre classifier (trained on your own tagged library) - used
+         when there's no confident fingerprint match. Only supplies genre,
+         not year.
+      3. Whatever genre/year tag was already on the file.
+
+    Returns genre/year plus which source each one came from, so the UI can
+    show how confident to be in the suggestion.
+    """
+    genre = ""
+    year = ""
+    genre_source = "none"
+    year_source = "none"
+
+    fp_result = None
+    try:
+        fp_result = identify.lookup_by_fingerprint(str(path))
+    except Exception:
+        fp_result = None
+
+    if fp_result is not None:
+        if fp_result.genre:
+            genre, genre_source = fp_result.genre, "fingerprint"
+        if fp_result.year:
+            year, year_source = fp_result.year, "fingerprint"
+
+    if not genre:
+        try:
+            ml_genre, ml_conf = genre_model.predict_genre(feats)
+        except Exception:
+            ml_genre, ml_conf = None, 0.0
+        if ml_genre and ml_conf >= config.GENRE_MODEL_MIN_CONFIDENCE:
+            genre, genre_source = ml_genre, f"ml_model ({ml_conf:.0%})"
+
+    if not genre and existing_meta.get("genre"):
+        genre, genre_source = existing_meta["genre"], "tag"
+
+    if not year and existing_meta.get("year"):
+        year, year_source = existing_meta["year"], "tag"
+
+    return {
+        "genre": genre,
+        "year": year,
+        "genre_source": genre_source,
+        "year_source": year_source,
+    }
+
+
+# -------------------------
 # Prediction proposals (clean)
 # -------------------------
 def propose_crates_for_files(
     bundle: dict,
     files: list[Path],
     topk: int = 3,
+    identify_genre: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     model = bundle["model"]
     feature_cols = bundle["feature_columns"]
@@ -262,12 +322,22 @@ def propose_crates_for_files(
             conf_map = dict(class_probs)
             conf = float(conf_map.get(pred, 0.0))
 
+            if identify_genre:
+                gy = identify_genre_year(f, feats, meta)
+            else:
+                gy = {
+                    "genre": meta["genre"], "year": meta["year"],
+                    "genre_source": "tag", "year_source": "tag",
+                }
+
             row = {
                 "Song Title": meta["title"] or f.stem,
                 "Artist": meta["artist"],
                 "BPM": round(float(feats[0]), 2),
-                "Genre": meta["genre"],
-                "Year": meta["year"],
+                "Genre": gy["genre"],
+                "Genre Source": gy["genre_source"],
+                "Year": gy["year"],
+                "Year Source": gy["year_source"],
                 "Suggested Crate": pred,
                 "Confidence": round(conf, 2),
                 "path": str(f),  # keep hidden for commit
