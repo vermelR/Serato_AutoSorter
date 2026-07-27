@@ -1,0 +1,252 @@
+{
+  "results": [
+    {
+      "evaluation": {
+        "items": 100,
+        "micro_f1": 0.11180124223602485,
+        "seconds": 0.523393292000037,
+        "top3_hit_rate": 0.21
+      },
+      "feature_cache": {
+        "bytes": 90112,
+        "hits": 500,
+        "lookup_items": 500,
+        "lookup_seconds": 0.17211016699911852,
+        "misses": 0,
+        "write_items": 500,
+        "write_seconds": 0.0036878329992759973
+      },
+      "memory": {
+        "estimated_live_bytes": 124943,
+        "process_peak_rss_bytes": 207749120,
+        "python_current_bytes": 4846280,
+        "python_peak_bytes": 7060648
+      },
+      "model": {
+        "artifact_bytes": 26546,
+        "candidate_training_seconds": 0.007253583000419894,
+        "cold_load_seconds": 0.0017484580002928851,
+        "disk_load_calls": 1,
+        "in_memory_bytes": 29732,
+        "serialization_seconds": 0.0018774590007524239,
+        "training_preparation_seconds": 0.00026079199960804544,
+        "warm_load_seconds": 0.00024662499890837353
+      },
+      "prediction": {
+        "batch_items": 100,
+        "batch_seconds": 0.015463415998965502,
+        "estimator_calls_for_batch": 1,
+        "single_seconds": 0.00159200000052806
+      },
+      "profile": {
+        "crates": 20,
+        "name": "small",
+        "tracks": 500
+      },
+      "recorded_at": "2026-07-24T16:25:50.643628+00:00",
+      "scanning": {
+        "changed_crates_parsed": 1,
+        "changed_directories_enumerated": 0,
+        "changed_incremental_seconds": 0.22382166600073106,
+        "changed_music_items": 2,
+        "clean_verification_full_seconds": 0.2559743329984485,
+        "full_crates_parsed": 20,
+        "full_directories_enumerated": 2,
+        "full_music_file_stat_checks": 500,
+        "full_seconds": 0.25541845800034935,
+        "incremental_equals_clean_full": true,
+        "music_files_seen": 500,
+        "unchanged_crates_parsed": 0,
+        "unchanged_crates_reused": 20,
+        "unchanged_directories_enumerated": 0,
+        "unchanged_incremental_seconds": 0.2248397079983988,
+        "unchanged_music_file_stat_checks": 500,
+        "unchanged_music_files_reused": 500
+      },
+      "startup": {
+        "cold_seconds": 0.973866000000271,
+        "warm_seconds": 1.8749997252598405e-06
+      },
+      "table": {
+        "filtered_rows": 167,
+        "page_size": 50,
+        "preparation_seconds": 0.009732500000609434,
+        "records": 500,
+        "rendered_rows": 50
+      },
+      "watcher_burst": {
+        "accepted": 500,
+        "bounded_capacity": 10000,
+        "events": 500,
+        "seconds": 0.011793499999839696,
+        "stored": 500
+      }
+    },
+    {
+      "evaluation": {
+        "items": 1000,
+        "micro_f1": 0.0031496062992125984,
+        "seconds": 3.0025612499994168,
+        "top3_hit_rate": 0.043
+      },
+      "feature_cache": {
+        "bytes": 1478656,
+        "hits": 2000,
+        "lookup_items": 2000,
+        "lookup_seconds": 0.5882671250001295,
+        "misses": 0,
+        "write_items": 10000,
+        "write_seconds": 0.03991395800039754
+      },
+      "memory": {
+        "estimated_live_bytes": 3304904,
+        "process_peak_rss_bytes": 342589440,
+        "python_current_bytes": 9237110,
+        "python_peak_bytes": 50809626
+      },
+      "model": {
+        "artifact_bytes": 965797,
+        "candidate_training_seconds": 0.0026140000009036157,
+        "cold_load_seconds": 0.004360125001767301,
+        "disk_load_calls": 1,
+        "in_memory_bytes": 592132,
+        "serialization_seconds": 0.02300216699950397,
+        "training_preparation_seconds": 0.0008500000003550667,
+        "warm_load_seconds": 0.00023491600040870253
+      },
+      "prediction": {
+        "batch_items": 128,
+        "batch_seconds": 0.025973833000534796,
+        "estimator_calls_for_batch": 1,
+        "single_seconds": 0.0015092090015969006
+      },
+      "profile": {
+        "crates": 100,
+        "name": "medium",
+        "tracks": 10000
+      },
+      "recorded_at": "2026-07-24T16:26:23.563650+00:00",
+      "scanning": {
+        "changed_crates_parsed": 1,
+        "changed_directories_enumerated": 0,
+        "changed_incremental_seconds": 4.374772541001221,
+        "changed_music_items": 2,
+        "clean_verification_full_seconds": 5.060271124999417,
+        "full_crates_parsed": 100,
+        "full_directories_enumerated": 21,
+        "full_music_file_stat_checks": 10000,
+        "full_seconds": 5.00646045800022,
+        "incremental_equals_clean_full": true,
+        "music_files_seen": 10000,
+        "unchanged_crates_parsed": 0,
+        "unchanged_crates_reused": 100,
+        "unchanged_directories_enumerated": 0,
+        "unchanged_incremental_seconds": 4.410434834000625,
+        "unchanged_music_file_stat_checks": 10000,
+        "unchanged_music_files_reused": 10000
+      },
+      "startup": {
+        "cold_seconds": 0.9608555409995461,
+        "warm_seconds": 1.7499987734481692e-06
+      },
+      "table": {
+        "filtered_rows": 3334,
+        "page_size": 50,
+        "preparation_seconds": 0.06901795799967658,
+        "records": 10000,
+        "rendered_rows": 50
+      },
+      "watcher_burst": {
+        "accepted": 10000,
+        "bounded_capacity": 10000,
+        "events": 10000,
+        "seconds": 0.21521849999953702,
+        "stored": 10000
+      }
+    },
+    {
+      "evaluation": {
+        "items": 1000,
+        "micro_f1": 0.0,
+        "seconds": 8.191853291998996,
+        "top3_hit_rate": 0.011
+      },
+      "feature_cache": {
+        "bytes": 7385088,
+        "hits": 2000,
+        "lookup_items": 2000,
+        "lookup_seconds": 0.5971580419991369,
+        "misses": 0,
+        "write_items": 50000,
+        "write_seconds": 0.19730091599922162
+      },
+      "memory": {
+        "estimated_live_bytes": 26567904,
+        "process_peak_rss_bytes": 830996480,
+        "python_current_bytes": 48458642,
+        "python_peak_bytes": 260106828
+      },
+      "model": {
+        "artifact_bytes": 4819600,
+        "candidate_training_seconds": 0.023353541000687983,
+        "cold_load_seconds": 0.014989584000431933,
+        "disk_load_calls": 1,
+        "in_memory_bytes": 2960132,
+        "serialization_seconds": 0.11162666699965484,
+        "training_preparation_seconds": 0.003966874999605352,
+        "warm_load_seconds": 0.0002407079991826322
+      },
+      "prediction": {
+        "batch_items": 128,
+        "batch_seconds": 0.05654645799950231,
+        "estimator_calls_for_batch": 1,
+        "single_seconds": 0.00211683300040022
+      },
+      "profile": {
+        "crates": 300,
+        "name": "large",
+        "tracks": 50000
+      },
+      "recorded_at": "2026-07-24T16:28:53.889152+00:00",
+      "scanning": {
+        "changed_crates_parsed": 1,
+        "changed_directories_enumerated": 0,
+        "changed_incremental_seconds": 22.592288207999445,
+        "changed_music_items": 2,
+        "clean_verification_full_seconds": 26.029028208000454,
+        "full_crates_parsed": 300,
+        "full_directories_enumerated": 101,
+        "full_music_file_stat_checks": 50000,
+        "full_seconds": 25.67925658400054,
+        "incremental_equals_clean_full": true,
+        "music_files_seen": 50000,
+        "unchanged_crates_parsed": 0,
+        "unchanged_crates_reused": 300,
+        "unchanged_directories_enumerated": 0,
+        "unchanged_incremental_seconds": 22.566464125000493,
+        "unchanged_music_file_stat_checks": 50000,
+        "unchanged_music_files_reused": 50000
+      },
+      "startup": {
+        "cold_seconds": 0.9652189160005946,
+        "warm_seconds": 1.7089987522922456e-06
+      },
+      "table": {
+        "filtered_rows": 16667,
+        "page_size": 50,
+        "preparation_seconds": 0.3364614999991318,
+        "records": 50000,
+        "rendered_rows": 50
+      },
+      "watcher_burst": {
+        "accepted": 10000,
+        "bounded_capacity": 10000,
+        "events": 50000,
+        "seconds": 0.7104588330003025,
+        "stored": 10000
+      }
+    }
+  ],
+  "safety": "Synthetic scalar features, temporary empty audio fixtures, temporary Serato roots, no source-audio writes, and no network access.",
+  "schema_version": "seratoai-m6-benchmarks-v1"
+}
