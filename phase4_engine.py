@@ -6,13 +6,22 @@ import tempfile
 import warnings
 from pathlib import Path
 from typing import Tuple, Dict, Any
-from urllib.parse import unquote
 
 import joblib
 import librosa
 import numpy as np
 import pandas as pd
 from mutagen import File as MutagenFile
+
+import config
+from serato_ai.core.confidence import filter_and_rank_independent_probabilities, filter_and_rank_probabilities
+from serato_ai.core.models import EvaluationConfiguration, ThresholdConfiguration
+from serato_ai.core.path_utils import normalize_path
+from serato_ai.core.quality_rules import prediction_quality_state
+from serato_ai.core.storage_rules import StorageBudgets, assess_model_size
+from serato_ai.infrastructure.metadata_providers import EmbeddedTagProvider
+from serato_ai.services.metadata_enrichment_service import MetadataEnrichmentService
+from serato_ai.settings import load_settings
 
 # -------------------------
 # Configuration
@@ -29,32 +38,6 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 # -------------------------
 # Path helpers
 # -------------------------
-def normalize_path(raw_path: str) -> str:
-    if raw_path is None:
-        return ""
-
-    p = str(raw_path).strip().replace("\r", "").replace("\n", "")
-    p = p.strip().strip('"').strip("'")
-
-    if p.startswith("file://"):
-        p = p.replace("file://", "", 1)
-
-    p = unquote(p)
-    p = os.path.expanduser(p)
-
-    if p.startswith("Users/"):
-        p = "/" + p
-
-    # Handle legacy "Mac:Users:..." style paths
-    if ":" in p and not p.startswith("/"):
-        parts = p.split(":")
-        if "Users" in parts:
-            idx = parts.index("Users")
-            p = "/" + "/".join(parts[idx:])
-
-    return p
-
-
 def collect_audio_files(inputs: list[str], recursive: bool = True) -> list[Path]:
     found: list[Path] = []
     for item in inputs:
@@ -139,6 +122,7 @@ def extract_audio_features(file_path: str) -> list[float]:
 
         # 1) BPM
         tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+        tempo = float(np.asarray(tempo).reshape(-1)[0])
 
         # 2) Brightness
         centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
@@ -152,7 +136,7 @@ def extract_audio_features(file_path: str) -> list[float]:
         mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
         mfccs_scaled = np.mean(mfccs.T, axis=0).astype(float).tolist()
 
-        return [float(tempo), brightness, energy] + mfccs_scaled
+        return [tempo, brightness, energy] + mfccs_scaled
 
     finally:
         # Cleanup temp wav to avoid filling disk
@@ -169,9 +153,36 @@ def load_model_bundle(model_path: str = "serato_model.pkl") -> dict:
         p = (Path.cwd() / p).resolve()
     if not p.exists():
         raise FileNotFoundError(f"Model not found: {p}")
+    settings = load_settings()
+    assessment = assess_model_size(
+        p.stat().st_size,
+        StorageBudgets(
+            preferred_bytes=settings.preferred_model_bytes,
+            warning_bytes=settings.model_warning_bytes,
+            review_bytes=settings.model_review_bytes,
+            hard_limit_bytes=settings.model_hard_limit_bytes,
+            allow_developer_override=settings.allow_oversized_model,
+        ),
+    )
+    if not assessment.automatic_activation_allowed:
+        raise ValueError(
+            "Model is too large to load safely. "
+            + " ".join(assessment.warnings)
+            + " Build a compact candidate; the legacy file has not been changed."
+        )
     bundle = joblib.load(str(p))
-    if "model" not in bundle or "feature_columns" not in bundle:
+    if not isinstance(bundle, dict) or "model" not in bundle or "feature_columns" not in bundle:
         raise ValueError("Model bundle missing keys: 'model' and/or 'feature_columns'")
+    model = bundle["model"]
+    if not hasattr(model, "classes_"):
+        raise ValueError("Model bundle model is missing classes_")
+    if not callable(getattr(model, "predict_proba", None)):
+        raise ValueError("Model bundle model is missing predict_proba")
+    if not isinstance(bundle["feature_columns"], (list, tuple)):
+        raise ValueError("Model bundle feature_columns must be a list or tuple")
+    bundle.setdefault("bundle_schema_version", "legacy")
+    bundle.setdefault("model_version", p.stem)
+    bundle.setdefault("artifact_size_bytes", p.stat().st_size)
     return bundle
 
 
@@ -235,55 +246,196 @@ def read_track_metadata(path: Path) -> Dict[str, Any]:
 
 
 # -------------------------
+# Offline-first Genre / Year identification
+# -------------------------
+def _offline_metadata_service() -> MetadataEnrichmentService:
+    """Build the shared tags-first service without enabling online providers."""
+    return MetadataEnrichmentService(
+        embedded_provider=EmbeddedTagProvider(read_track_metadata),
+        minimum_local_confidence=config.GENRE_MODEL_MIN_CONFIDENCE,
+    )
+
+
+def identify_genre_year(path: Path, feats: list[float], existing_meta: Dict[str, Any]) -> Dict[str, Any]:
+    """Compatibility wrapper for the offline-first metadata contract.
+
+    Existing Genre and Year tags are always considered first. Local ML can fill
+    only a missing Genre; missing/invalid Year remains blank. No fingerprint or
+    provider lookup is attempted here.
+    """
+    service = MetadataEnrichmentService(
+        embedded_provider=EmbeddedTagProvider(lambda _path: existing_meta),
+        minimum_local_confidence=config.GENRE_MODEL_MIN_CONFIDENCE,
+    )
+    result = service.enrich(path, features=tuple(feats), use_local_genre=True)
+    return {
+        "genre": result.genre,
+        "year": result.year,
+        "genre_source": result.genre_source,
+        "year_source": result.year_source,
+        "genre_confidence": result.genre_confidence,
+        "online_lookup_attempted": result.online_lookup_attempted,
+        "provider_status": result.provider_status,
+    }
+
+
+def _prediction_quality_configuration(bundle: dict) -> tuple[EvaluationConfiguration, ThresholdConfiguration, dict[str, int]]:
+    """Read persisted M5 quality settings, falling back safely for older models."""
+    raw = bundle.get("quality_configuration", {})
+    if not isinstance(raw, dict):
+        raw = {}
+    threshold_raw = raw.get("threshold_configuration", {})
+    if not isinstance(threshold_raw, dict):
+        threshold_raw = {}
+    try:
+        thresholds = ThresholdConfiguration(
+            global_threshold=float(threshold_raw.get("global_threshold", 0.50)),
+            per_crate=tuple((str(crate), float(value)) for crate, value in threshold_raw.get("per_crate", ())),
+            minimum_threshold=float(threshold_raw.get("minimum_threshold", 0.20)),
+            maximum_threshold=float(threshold_raw.get("maximum_threshold", 0.80)),
+            minimum_support=int(threshold_raw.get("minimum_support", 3)),
+            objective=str(threshold_raw.get("objective", "f1")),
+            source_split=str(threshold_raw.get("source_split", "legacy_default")),
+        )
+    except (TypeError, ValueError):
+        thresholds = ThresholdConfiguration()
+    configuration = EvaluationConfiguration(
+        low_confidence_probability=float(raw.get("low_confidence_probability", 0.40)),
+        low_confidence_margin=float(raw.get("low_confidence_margin", 0.05)),
+        per_crate_minimum_support=int(raw.get("per_crate_minimum_support", 2)),
+    )
+    support = raw.get("training_support", {})
+    return configuration, thresholds, {str(crate): int(value) for crate, value in support.items()} if isinstance(support, dict) else {}
+
+
+# -------------------------
 # Prediction proposals (clean)
 # -------------------------
 def propose_crates_for_files(
     bundle: dict,
     files: list[Path],
     topk: int = 3,
+    identify_genre: bool = True,
+    excluded_crates: set[str] | None = None,
+    allowed_crates: set[str] | None = None,
+    metadata_service: MetadataEnrichmentService | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     model = bundle["model"]
     feature_cols = bundle["feature_columns"]
-
     rows = []
     fails = []
+    metadata = metadata_service or _offline_metadata_service()
+    quality_configuration, thresholds, support_by_crate = _prediction_quality_configuration(bundle)
+    prepared: list[tuple[Path, list[float], Any]] = []
 
     for f in files:
         try:
-            meta = read_track_metadata(f)
+            # This must happen before audio extraction, model prediction, or
+            # any local fallback so valid tags are always authoritative.
+            embedded = metadata.read_embedded(f)
             feats = extract_audio_features(str(f))
-
-            X = pd.DataFrame([feats], columns=feature_cols)
-
-            pred = model.predict(X)[0]
-            probs = model.predict_proba(X)[0]
-            class_probs = sorted(zip(model.classes_, probs), key=lambda t: t[1], reverse=True)
-
-            conf_map = dict(class_probs)
-            conf = float(conf_map.get(pred, 0.0))
-
-            row = {
-                "Song Title": meta["title"] or f.stem,
-                "Artist": meta["artist"],
-                "BPM": round(float(feats[0]), 2),
-                "Genre": meta["genre"],
-                "Year": meta["year"],
-                "Suggested Crate": pred,
-                "Confidence": round(conf, 2),
-                "path": str(f),  # keep hidden for commit
-            }
-
-            for i, (label, pval) in enumerate(class_probs[:topk], start=1):
-                row[f"_top{i}_crate"] = label
-                row[f"_top{i}_prob"] = float(pval)
-
-            rows.append(row)
-
+            enriched = metadata.enrich(
+                f, features=tuple(feats), embedded=embedded, use_local_genre=identify_genre,
+            )
+            prepared.append((f, feats, enriched))
         except Exception as e:
             fails.append({
                 "Song Title": f.stem,
                 "path": str(f),
                 "error": f"{type(e).__name__}: {e}",
             })
+
+    ranker = (
+        filter_and_rank_independent_probabilities
+        if bundle.get("prediction_semantics") == "independent_multilabel"
+        else filter_and_rank_probabilities
+    )
+
+    def append_prediction(f: Path, feats: list[float], enriched, probs) -> None:
+        try:
+            suggestions = ranker(
+                zip(model.classes_, probs),
+                allowed_crates=allowed_crates,
+                excluded_crates=excluded_crates,
+            )
+            pred, conf = suggestions[0].crate_name, suggestions[0].probability
+            quality = prediction_quality_state(
+                tuple((suggestion.crate_name, suggestion.probability) for suggestion in suggestions),
+                thresholds, quality_configuration, support_by_crate=support_by_crate,
+            )
+
+            row = {
+                "Song Title": enriched.title or f.stem,
+                "Artist": enriched.artist,
+                "BPM": round(float(feats[0]), 2),
+                "Genre": enriched.genre,
+                "Genre Source": enriched.genre_source,
+                "Genre Confidence": float(enriched.genre_confidence),
+                "Year": enriched.year,
+                "Year Source": enriched.year_source,
+                "_metadata_raw_year": enriched.raw_year,
+                "Suggested Crate": pred,
+                # Keep the full conditional probability. The UI formats it as
+                # a percentage, so rounding here would make displayed values
+                # inaccurate after the allow-list is renormalized.
+                "Confidence": float(conf),
+                "Prediction Quality": quality.prediction_quality.replace("_", " ").title(),
+                "Needs Review": quality.needs_review,
+                "Review Reason": quality.review_reason,
+                "Top Margin": float(quality.top_margin),
+                "Threshold Used": float(quality.threshold_used),
+                "Supported Crate Count": quality.supported_crate_count,
+                "path": str(f),  # keep hidden for commit
+                "_allowed_crates": sorted(suggestion.crate_name for suggestion in suggestions),
+                "_metadata_provider_status": list(enriched.provider_status),
+                "_metadata_warnings": list(enriched.warnings),
+                "_online_lookup_attempted": enriched.online_lookup_attempted,
+            }
+
+            for suggestion in suggestions[:max(0, int(topk))]:
+                row[f"_top{suggestion.rank}_crate"] = suggestion.crate_name
+                row[f"_top{suggestion.rank}_prob"] = float(suggestion.probability)
+
+            rows.append(row)
+        except Exception as e:
+            fails.append({
+                "Song Title": f.stem,
+                "path": str(f),
+                "error": f"{type(e).__name__}: {e}",
+            })
+
+    batch_size = load_settings().prediction_batch_size
+    for start in range(0, len(prepared), batch_size):
+        batch = prepared[start : start + batch_size]
+        matrix = pd.DataFrame(
+            np.asarray([features for _, features, _ in batch], dtype=np.float32),
+            columns=feature_cols,
+        )
+        try:
+            probabilities = np.asarray(model.predict_proba(matrix), dtype=float)
+            if probabilities.shape != (len(batch), len(model.classes_)):
+                raise ValueError("Batch probability shape does not match tracks and classes.")
+            for (path, features, enriched), probability_row in zip(batch, probabilities):
+                append_prediction(path, features, enriched, probability_row)
+        except Exception:
+            # A single unreadable/corrupt row must not discard a healthy batch.
+            # The fallback also preserves compatibility with older estimators
+            # that only accept one row at a time.
+            for path, features, enriched in batch:
+                try:
+                    single = pd.DataFrame(
+                        np.asarray([features], dtype=np.float32),
+                        columns=feature_cols,
+                    )
+                    probability_row = np.asarray(model.predict_proba(single), dtype=float)
+                    if probability_row.shape != (1, len(model.classes_)):
+                        raise ValueError("Probability shape does not match the model class list.")
+                    append_prediction(path, features, enriched, probability_row[0])
+                except Exception as exc:
+                    fails.append({
+                        "Song Title": path.stem,
+                        "path": str(path),
+                        "error": f"{type(exc).__name__}: {exc}",
+                    })
 
     return pd.DataFrame(rows), pd.DataFrame(fails)

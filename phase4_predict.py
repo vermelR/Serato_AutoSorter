@@ -130,6 +130,7 @@ def extract_audio_features(file_path: str):
 
     # BPM (tempo)
     tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+    tempo = float(np.asarray(tempo).reshape(-1)[0])
 
     # Brightness (spectral centroid)
     centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
@@ -144,7 +145,7 @@ def extract_audio_features(file_path: str):
     mfccs_scaled = np.mean(mfccs.T, axis=0).astype(float).tolist()
 
     # Keep same ordering as training
-    return [float(tempo), brightness, energy] + mfccs_scaled
+    return [tempo, brightness, energy] + mfccs_scaled
 
 
 # -------------------------

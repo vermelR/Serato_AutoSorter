@@ -101,6 +101,7 @@ def extract_audio_features(file_path: str, title: str):
         y = pick_audio_window(y, sr)
 
         tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+        tempo = float(np.asarray(tempo).reshape(-1)[0])
 
         centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
         brightness = float(np.mean(centroid))
@@ -111,7 +112,7 @@ def extract_audio_features(file_path: str, title: str):
         mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
         mfccs_scaled = np.mean(mfccs.T, axis=0).astype(float).tolist()
 
-        return [float(tempo), brightness, energy] + mfccs_scaled
+        return [(tempo), brightness, energy] + mfccs_scaled
 
     except Exception as e:
         return e

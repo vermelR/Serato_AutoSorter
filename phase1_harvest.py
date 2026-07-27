@@ -1,52 +1,37 @@
 import os
-import struct
 import csv
+from pathlib import Path
+
+from serato_crate import parse_serato_crate as _parse_serato_crate
+from serato_ai.settings import load_settings
 
 # --- CONFIGURATION ---
-SERATO_FOLDER = '/Users/rohan/Music/_Serato_/Subcrates'
+SERATO_FOLDER = str(Path(load_settings().default_serato_root) / "Subcrates")
 OUTPUT_FILE = 'serato_training_data.csv'
 
 def parse_serato_crate(file_path):
-    """Manually parses the binary .crate file to extract track paths."""
-    tracks = []
-    try:
-        with open(file_path, 'rb') as f:
-            content = f.read()
-            
-        pos = 0
-        while True:
-            pos = content.find(b'ptrk', pos)
-            if pos == -1: break
-            
-            size_pos = pos + 4
-            size = struct.unpack('>I', content[size_pos:size_pos+4])[0]
-            
-            path_data = content[size_pos+4 : size_pos+4+size]
-            path = path_data.decode('utf-16-be').strip('\x00')
-            tracks.append(path)
-            
-            pos += 8 + size 
-            
-    except Exception as e:
-        print(f"⚠️ Could not read {os.path.basename(file_path)}: {e}")
-    
-    return tracks
+    """Safely parse binary crate path records; malformed files raise clearly."""
+    return [entry.path for entry in _parse_serato_crate(file_path)]
 
-def main():
+def main(serato_folder: str = SERATO_FOLDER, output_file: str = OUTPUT_FILE):
     dataset = []
 
-    if not os.path.exists(SERATO_FOLDER):
-        print(f"❌ Folder not found: {SERATO_FOLDER}")
+    if not os.path.exists(serato_folder):
+        print(f"❌ Folder not found: {serato_folder}")
         return
 
     print("🔍 Scanning your Serato Crates...")
-    crate_files = [f for f in os.listdir(SERATO_FOLDER) if f.endswith('.crate')]
+    crate_files = [f for f in os.listdir(serato_folder) if f.endswith('.crate')]
 
     for filename in crate_files:
-        path = os.path.join(SERATO_FOLDER, filename)
+        path = os.path.join(serato_folder, filename)
         crate_name = filename.replace('.crate', '').replace('%%%', ' > ')
         
-        tracks = parse_serato_crate(path)
+        try:
+            tracks = parse_serato_crate(path)
+        except ValueError as e:
+            print(f"⚠️ Could not read {os.path.basename(path)}: {e}")
+            continue
         print(f"📦 {crate_name}: {len(tracks)} tracks")
         
         for t in tracks:
@@ -64,13 +49,19 @@ def main():
 
     if dataset:
         # Added 'title' to the fieldnames
-        with open(OUTPUT_FILE, 'w', newline='', encoding='utf-8') as f:
+        with open(output_file, 'w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=['title', 'path', 'crate'])
             writer.writeheader()
             writer.writerows(dataset)
-        print(f"\n✅ SUCCESS! {len(dataset)} tracks saved with titles to {OUTPUT_FILE}")
+        print(f"\n✅ SUCCESS! {len(dataset)} tracks saved with titles to {output_file}")
     else:
         print("❌ No tracks were found.")
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Harvest a Serato Subcrates folder for training data")
+    parser.add_argument("--serato-subcrates", default=SERATO_FOLDER)
+    parser.add_argument("--output", default=OUTPUT_FILE)
+    args = parser.parse_args()
+    main(args.serato_subcrates, args.output)
